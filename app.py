@@ -39,7 +39,7 @@ def test_url_for():
 # @app.route('/hello', methods=['GET', 'POST']) 只处理GET和POST方法
 
 # 定义虚拟数据
-name = 'Grey Li'
+name = '刘非凡'
 movies = [
     {'title': 'My Neighbor Totoro', 'year': '1988'},
     {'title': 'Dead Poets Society', 'year': '1989'},
@@ -52,9 +52,12 @@ movies = [
     {'title': 'WALL-E', 'year': '2008'},
     {'title': 'The Pork of Music', 'year': '2012'},
 ]
+
+
 @app.route('/index')
 def index():
-    return render_template('index.html',name=name,movies=movies)
+    return render_template('index.html', name=name, movies=movies)
+
 
 if __name__ == '__main__':
     # from waitress import serve
