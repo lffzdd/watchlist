@@ -2,7 +2,7 @@ import os.path
 import sys
 
 import click
-from flask import Flask, url_for, render_template
+from flask import Flask, url_for, render_template, request, flash, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, String, Integer
 from markupsafe import escape
@@ -118,18 +118,72 @@ def inject_user():  # 函数名可以随意修改
     return dict(user=user)  # 需要返回字典，等同于 return {'user': user}
 
 
-@app.route('/index')
+@app.route('/index', methods=['GET', 'POST'])
 # type: Flask
 def index():
-    user = User.query.first()
+    if request.method == 'POST':
+        '''创建电影条目'''
+        # 获取表单数据
+        title = request.form.get('title')  # 传入表单对应输入字段的 name 值
+        year = request.form.get('year')
+        # 验证数据
+        if not title or not year or len(year) != 4 or len(title) > 60:  # 若数据为空或长度错误
+            flash('Invalid input.')  # 显示错误提示
+            return redirect(url_for('index'))  # 重定向回主页
+        # 保存表单数据到数据库
+        movie = Movie(title=title, year=year)
+        db.session.add(movie)  # 添加到数据库会话
+        db.session.commit()
+        flash('提交成功！')  # flash() 函数在内部会把消息存储到 Flask 提供的 session 对象里。session 用来在请求间存储数据，它会把数据签名后存储到浏览器的 Cookie 中
+
+        return redirect(url_for('index'))
+
     movies = Movie.query.all()
     return render_template('index.html', movies=movies)
 
 
+app.config['SECRET_KEY'] = 'dev'  # 等同于 app.secret_key = 'dev'
+
+
+@app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
+def edit(movie_id):
+    movie = Movie.query.get_or_404(movie_id)
+
+    if request.method == 'POST':
+        title = request.form['title']
+        year = request.form['year']
+
+        if not title or not year or len(title) > 60 or len(year) != 4:
+            flash('Invalid input.')
+            return redirect(url_for('edit', movie_id=movie_id))
+
+        movie.title = title
+        movie.year = year
+        db.session.commit()
+        flash('数据已更新！')
+        return redirect(url_for('index'))
+
+    return render_template('edit.html', movie=movie)
+
+
+@app.route('/movie/delete/<int:movie_id>', methods=['POST'])
+def delete(movie_id):
+    movie = Movie.query.get_or_404(movie_id)
+    title = movie.title
+    db.session.delete(movie)
+    db.session.commit()
+    flash(f'《{title}》已删除！')
+    return redirect(url_for('index'))
+
+
 @app.errorhandler(404)  # 传入要处理的错误代码
 def page_not_found(e):  # 接受异常对象作为参数
-    user = User.query.first()
     return render_template('404.html'), 404  # 返回模板和状态码
+
+
+@app.route('/base')
+def bh():
+    return render_template('base.html')
 
 
 if __name__ == '__main__':
