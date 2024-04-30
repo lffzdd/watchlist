@@ -2,6 +2,8 @@ import os.path
 import sys
 
 import click
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, url_for, render_template, request, flash, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Column, String, Integer
@@ -16,15 +18,24 @@ else:  # 否则使用四个斜线
 
 app = Flask(__name__)  # type:Flask
 app.config['SQLALCHEMY_DATABASE_URI'] = prefix + os.path.join(app.root_path, 'data.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # 关闭对模型修改的监控
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True  # 关闭对模型修改的监控
 # 在扩展类实例化前加载配置
 db = SQLAlchemy(app)  # 初始化扩展，传入程序实例 app
 
 
 # 创建数据库模型
-class User(db.Model):  # 表名将会是 user（自动生成，小写处理）
+class User(db.Model, UserMixin):  # 表名将会是 user（自动生成，小写处理）
+    # 继承mixin会让 User 类拥有几个用于判断认证状态的属性和方法
     id = db.Column(db.Integer, primary_key=True)  # 主键
     name = db.Column(db.String(20))  # 名字
+    username = db.Column(db.String(20))  # 用户名
+    password_hash = db.Column(db.String(128))  # 哈希散列值
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def validate_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 
 class Movie(db.Model):  # 表名将会是 movie
@@ -49,6 +60,12 @@ def initdb(drop):
     click.echo('Initialzed database.')
 
 
+@app.context_processor
+def inject_user():  # 函数名可以随意修改
+    user = User.query.first()
+    return dict(user=user)  # 需要返回字典，等同于 return {'user': user}
+
+
 # 一个视图函数也可以绑定多个 URL，这通过附加多个装饰器实现
 @app.route('/')
 @app.route('/home')
@@ -57,7 +74,6 @@ def hello():  # put application's code here
 
 
 '''
-
 注意 用户输入的数据会包含恶意代码，所以不能直接作为响应返回，需要使用 MarkupSafe（Flask 的依赖之一）提供的 escape() 函数对 name 变量进行转义处理，比如把 < 转换成 &lt;。这样在返回响应时浏览器就不会把它们当做代码执行。
 # 对于 URL 变量，Flask 支持在 URL 规则字符串里对变量设置处理器，对变量进行预处理。比如 /user/<int:number> 会将 URL 中的 number 部分转换成整型。
 # @app.route('/hello', methods=['GET', 'POST']) 只处理GET和POST方法
@@ -112,17 +128,41 @@ def forge():
     click.echo('Done.')
 
 
-@app.context_processor
-def inject_user():  # 函数名可以随意修改
+@app.cli.command()
+@click.option('--username', prompt=True, help='管理员用户名')
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='管理员密码')
+def admin(username, password):
+    """生成管理员账户"""
+    db.create_all()
     user = User.query.first()
-    return dict(user=user)  # 需要返回字典，等同于 return {'user': user}
+    if user is not None:
+        click.echo('Updating user...')
+        user.username = username
+        user.set_password(password)
+    else:
+        click.echo('Creating user...')
+        user = User(username=username, name='Admin')
+        user.set_password(password)
+        db.session.add(user)
+    db.session.commit()
+    click.echo('Done')
+
+
+# base模板页面
+@app.route('/base')
+def bh():
+    return render_template('base.html')
 
 
 @app.route('/index', methods=['GET', 'POST'])
 # type: Flask
 def index():
+    """ index 页面 """
     if request.method == 'POST':
         '''创建电影条目'''
+
+        if not current_user.is_authenticated:  # 如果未登录
+            return redirect(url_for('index'))
         # 获取表单数据
         title = request.form.get('title')  # 传入表单对应输入字段的 name 值
         year = request.form.get('year')
@@ -146,7 +186,9 @@ app.config['SECRET_KEY'] = 'dev'  # 等同于 app.secret_key = 'dev'
 
 
 @app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
+@login_required
 def edit(movie_id):
+    """编辑页面"""
     movie = Movie.query.get_or_404(movie_id)
 
     if request.method == 'POST':
@@ -167,7 +209,9 @@ def edit(movie_id):
 
 
 @app.route('/movie/delete/<int:movie_id>', methods=['POST'])
+@login_required  # 登录保护，不允许未登录用户访问
 def delete(movie_id):
+    """删除页面"""
     movie = Movie.query.get_or_404(movie_id)
     title = movie.title
     db.session.delete(movie)
@@ -178,12 +222,68 @@ def delete(movie_id):
 
 @app.errorhandler(404)  # 传入要处理的错误代码
 def page_not_found(e):  # 接受异常对象作为参数
+    """ 404 处理页面 """
     return render_template('404.html'), 404  # 返回模板和状态码
 
 
-@app.route('/base')
-def bh():
-    return render_template('base.html')
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'  # 添加@required装饰器后未登录用户访问页面重定向到 login 界面
+login_manager.login_message = '请登录管理员账户！'  # 并显示错误消息提示
+
+
+@login_manager.user_loader
+def load_user(user_id):  # 创建一个用户加载回调函数，用于根据用户 ID 加载用户对象
+    user = User.query.get(int(user_id))  # 用 ID 作为 User 模型的主键查询对应的用户
+    return user
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """登录页面"""
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash('请输入用户名和密码！')
+            return redirect(url_for('login'))
+        user = User.query.first()
+        # 验证用户名和密码是否一致
+        if username == user.username and user.validate_password(password):
+            login_user(user)  # 登入用户，将用户对象加载到了会话中，这样在整个会话期间，Flask 就知道当前用户是谁了。
+            flash('Login success.\n登录成功')
+            return redirect(url_for('index'))
+        flash('Invalid username or password.')
+        return redirect(url_for('login'))
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+@login_required  # 用于视图保护
+def logout():
+    """登出页面"""
+    logout_user()
+    flash('已退出登录')
+    return redirect(url_for('index'))
+
+
+@app.route('/settings', methods=['GET', 'POST'])  # 没写method报错：Method Not Allowed
+@login_required
+def settings():
+    if request.method == 'POST':
+        name = request.form['name']
+
+        if not name or len(name) > 20:
+            flash('Invalid input')
+            return redirect(url_for('settings'))
+
+        current_user.name = name
+        db.session.commit()
+        flash('Settings updated.\n设置更新')
+        return redirect(url_for('index'))
+
+    return render_template('settings.html')
 
 
 if __name__ == '__main__':
