@@ -213,10 +213,9 @@ def edit(movie_id):
 def delete(movie_id):
     """删除页面"""
     movie = Movie.query.get_or_404(movie_id)
-    title = movie.title
     db.session.delete(movie)
     db.session.commit()
-    flash(f'《{title}》已删除！')
+    flash(f'《{movie.title}》已删除！')
     return redirect(url_for('index'))
 
 
