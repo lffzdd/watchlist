@@ -1,10 +1,10 @@
 import sys, os
 
-# from flask import Flask
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 
-from watchlist.watchlist import app
+# from watchlist.watchlist import app
 
 # 数据库配置
 WIN = sys.platform.startswith('win')
@@ -13,8 +13,10 @@ if WIN:  # 如果是Windows系统，使用三个斜线
 else:  # 否则使用四个斜线
     prefix = 'sqlite:////'
 
-app.secret_key = ['dev']
-app.config['SQLALCHEMY_DATABASE_URI'] = prefix + os.path.join(os.path.dirname(app.root_path), 'data.db')
+app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY', 'dev')  # 在生产环境下使用的配置改为优先从环境变量中读取，如果没有读取到，则使用默认值：
+app.config['SQLALCHEMY_DATABASE_URI'] = prefix + os.path.join(os.path.dirname(app.root_path),
+                                                              os.getenv('DATABASE_FILE', 'data.db'))
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
