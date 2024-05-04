@@ -6,3 +6,5 @@ __pycache__
 .coverage
 学习/
 *.db
+env
+test_watchlist.py

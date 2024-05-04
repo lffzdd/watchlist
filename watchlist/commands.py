@@ -29,8 +29,8 @@ def forge():
 
 
 @app.cli.command()
-@click.option('--user', help='管理员用户名')
-@click.option('--password', hide_input=True, confirmation_prompt=True, help='管理员密码')
+@click.option('--username', prompt=True, help='管理员用户名')  # 用--user报错了
+@click.option('--password', prompt=True, hide_input=False, confirmation_prompt=True, help='管理员密码')
 def admin(username, password):
     user = User.query.first()
     if user is not None:
@@ -45,5 +45,3 @@ def admin(username, password):
 
     db.session.commit()
     click.echo('管理员更新完毕！')
-
-
